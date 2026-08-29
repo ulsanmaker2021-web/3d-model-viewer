@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Upload, PanelLeft, Sparkles, HelpCircle, Eye } from 'lucide-react';
+import { Box, Upload, PanelLeft, Sparkles, HelpCircle, Eye, BookOpen } from 'lucide-react';
 import { ModelItem } from '../types';
 
 interface HeaderProps {
@@ -9,6 +9,7 @@ interface HeaderProps {
   onOpenUpload: () => void;
   onOpenHelp: () => void;
   onOpenHeritage: () => void;
+  onOpenAIAnimation: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -18,6 +19,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUpload,
   onOpenHelp,
   onOpenHeritage,
+  onOpenAIAnimation,
 }) => {
   return (
     <header className="h-14 border-b border-slate-800 bg-slate-950 px-4 flex items-center justify-between select-none z-30 shrink-0">
@@ -64,13 +66,23 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Right Action buttons */}
       <div className="flex items-center gap-2">
         <button
+          id="btn-header-ai-motion"
+          onClick={onOpenAIAnimation}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500/20 via-cyan-500/20 to-teal-500/20 hover:from-indigo-500/30 hover:to-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-xs font-bold transition-all shadow-sm shadow-cyan-500/10 active:scale-95"
+          title="AI 3D 애니메이션 & 모션 자동 생성"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+          <span>✨ AI 모션 생성</span>
+        </button>
+
+        <button
           id="btn-header-heritage"
           onClick={onOpenHeritage}
-          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs font-semibold transition-all shadow-sm"
-          title="반가사유상 3D 모델 및 무료 다운로드 안내"
+          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700/80 hover:border-cyan-500/40 text-slate-200 hover:text-cyan-300 text-xs font-semibold transition-all shadow-sm active:scale-95"
+          title="무료 3D 모델 다운로드 및 Image/Text-to-3D AI 가이드"
         >
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>반가사유상 3D 안내</span>
+          <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+          <span>3D 에셋 & AI 가이드</span>
         </button>
 
         <button

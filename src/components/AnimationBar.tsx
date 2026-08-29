@@ -7,6 +7,7 @@ interface AnimationBarProps {
   onSelectAnimation: (index: number) => void;
   isPlaying: boolean;
   onTogglePlay: () => void;
+  onResetPose?: () => void;
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
@@ -22,6 +23,7 @@ export const AnimationBar: React.FC<AnimationBarProps> = ({
   onSelectAnimation,
   isPlaying,
   onTogglePlay,
+  onResetPose,
   currentTime,
   duration,
   onSeek,
@@ -83,11 +85,23 @@ export const AnimationBar: React.FC<AnimationBarProps> = ({
           <button
             id="btn-animation-toggle-play"
             onClick={onTogglePlay}
-            className="w-9 h-9 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center font-bold transition-all shadow-md shadow-cyan-500/20 active:scale-95"
+            className="w-9 h-9 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 flex items-center justify-center font-bold transition-all shadow-md shadow-cyan-500/20 active:scale-95 cursor-pointer"
             title={isPlaying ? '일시정지' : '재생'}
           >
             {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current translate-x-0.5" />}
           </button>
+
+          {/* Reset Pose / Frame Button */}
+          {onResetPose && (
+            <button
+              id="btn-animation-reset-pose"
+              onClick={onResetPose}
+              className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center transition-all border border-slate-700 active:scale-95 cursor-pointer"
+              title="원래 기본 포즈 및 스케일 복원"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 

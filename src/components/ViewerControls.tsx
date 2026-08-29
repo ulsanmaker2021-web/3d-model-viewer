@@ -4,6 +4,7 @@ import {
   Eye,
   Camera,
   RotateCw,
+  RotateCcw,
   Grid,
   Sparkles,
   Maximize2,
@@ -22,9 +23,11 @@ interface ViewerControlsProps {
   settings: ViewerSettings;
   onUpdateSettings: (newSettings: Partial<ViewerSettings>) => void;
   onCameraSnap: (view: 'front' | 'top' | 'side' | 'isometric' | 'reset') => void;
+  onResetModelTransform?: () => void;
   onTakeScreenshot: () => void;
   onOpenModelInfo: () => void;
   onOpenHierarchy: () => void;
+  onOpenAIAnimation: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
 }
@@ -33,9 +36,11 @@ export const ViewerControls: React.FC<ViewerControlsProps> = ({
   settings,
   onUpdateSettings,
   onCameraSnap,
+  onResetModelTransform,
   onTakeScreenshot,
   onOpenModelInfo,
   onOpenHierarchy,
+  onOpenAIAnimation,
   isFullscreen,
   onToggleFullscreen,
 }) => {
@@ -153,10 +158,33 @@ export const ViewerControls: React.FC<ViewerControlsProps> = ({
           >
             <Grid className="w-4 h-4" />
           </button>
+
+          {/* Reset Scale & Pose Button */}
+          {onResetModelTransform && (
+            <button
+              id="btn-ctrl-reset-scale-pose"
+              onClick={onResetModelTransform}
+              className="p-1.5 rounded-xl text-xs text-amber-300/90 hover:text-amber-200 hover:bg-amber-500/20 border border-amber-500/30 transition-all flex items-center gap-1 px-2"
+              title="오브젝트 원래 크기(Scale) 및 기본 포즈 즉시 복원"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="font-semibold text-[11px] hidden sm:inline">스케일/포즈 리셋</span>
+            </button>
+          )}
         </div>
 
         {/* Right Action Group */}
         <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/85 backdrop-blur-md border border-slate-700/70 rounded-2xl pointer-events-auto shadow-xl shadow-black/40">
+          <button
+            id="btn-ctrl-ai-motion"
+            onClick={onOpenAIAnimation}
+            className="p-1.5 rounded-xl text-xs bg-gradient-to-r from-indigo-500/20 to-cyan-500/20 border border-cyan-500/30 text-cyan-300 hover:from-indigo-500/30 hover:to-cyan-500/30 transition-all flex items-center gap-1.5 px-2.5 font-bold shadow-sm"
+            title="AI 3D 모션 & 애니메이션 생성기 열기"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            <span className="font-semibold">AI 모션</span>
+          </button>
+
           <button
             id="btn-ctrl-hierarchy"
             onClick={onOpenHierarchy}
@@ -362,9 +390,10 @@ export const ViewerControls: React.FC<ViewerControlsProps> = ({
             </button>
             <button
               onClick={() => onCameraSnap('reset')}
-              className="col-span-2 px-2.5 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/30 rounded-xl text-xs font-semibold text-center transition-all"
+              className="col-span-2 px-2.5 py-1.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-500/30 rounded-xl text-xs font-semibold text-center transition-all flex items-center justify-center gap-1.5"
             >
-              초기 뷰 리셋
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>초기 뷰 & 스케일 리셋</span>
             </button>
           </div>
         </div>

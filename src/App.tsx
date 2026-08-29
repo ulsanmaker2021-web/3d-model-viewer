@@ -17,7 +17,11 @@ import { HierarchyTreeModal } from './components/HierarchyTreeModal';
 import { HelpModal } from './components/HelpModal';
 import { HeritageModal } from './components/HeritageModal';
 import { DeleteConfirmModal } from './components/DeleteConfirmModal';
+import { AIAnimationModal } from './components/AIAnimationModal';
 import { Header } from './components/Header';
+import { AIAnimationResult } from './utils/aiAnimationGenerator';
+import * as THREE from 'three';
+import { Sparkles } from 'lucide-react';
 
 export default function App() {
   const [models, setModels] = useState<ModelItem[]>(DEFAULT_MODELS);
@@ -48,6 +52,7 @@ export default function App() {
   const [animationTime, setAnimationTime] = useState<number>(0);
   const [animationDuration, setAnimationDuration] = useState<number>(1);
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
+  const [customClips, setCustomClips] = useState<THREE.AnimationClip[]>([]);
 
   // Model Metadata & Hierarchy States
   const [currentStats, setCurrentStats] = useState<ModelStats | null>(null);
@@ -56,6 +61,7 @@ export default function App() {
 
   // Interactive Signals
   const [cameraSnapSignal, setCameraSnapSignal] = useState<'front' | 'top' | 'side' | 'isometric' | 'reset' | null>(null);
+  const [resetTransformSignal, setResetTransformSignal] = useState<number>(0);
   const [shouldTakeScreenshot, setShouldTakeScreenshot] = useState<boolean>(false);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
 
@@ -65,6 +71,7 @@ export default function App() {
   const [isHierarchyOpen, setIsHierarchyOpen] = useState<boolean>(false);
   const [isHelpOpen, setIsHelpOpen] = useState<boolean>(false);
   const [isHeritageOpen, setIsHeritageOpen] = useState<boolean>(false);
+  const [isAIAnimationOpen, setIsAIAnimationOpen] = useState<boolean>(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
 
   const mainContainerRef = useRef<HTMLDivElement>(null);
@@ -96,6 +103,7 @@ export default function App() {
     setIsPlayingAnimation(true);
     setAnimationTime(0);
     setHiddenMeshIds(new Set());
+    setCustomClips([]);
   }, []);
 
   // Handle Model Stats Loaded from Three.js
@@ -105,6 +113,31 @@ export default function App() {
     if (stats.animations && stats.animations.length > 0) {
       setActiveAnimationIndex(0);
     }
+  }, []);
+
+  // Handle AI / Standard Motion Applied
+  const handleApplyAIAnimation = useCallback((result: AIAnimationResult) => {
+    setCustomClips((prev) => {
+      const nextClips = [...prev, result.clip];
+      // Target index is native clips count + new clip index in customClips
+      setCurrentStats((latest) => {
+        const existing = latest?.animations || [];
+        const updated = [...existing, result.clipName];
+        const newIndex = updated.length - 1;
+        setActiveAnimationIndex(newIndex);
+        return latest
+          ? {
+              ...latest,
+              animationCount: updated.length,
+              animations: updated,
+            }
+          : latest;
+      });
+      return nextClips;
+    });
+
+    setIsPlayingAnimation(true);
+    setAnimationTime(0);
   }, []);
 
   // Handle Thumbnail Generation
@@ -200,6 +233,13 @@ export default function App() {
     setTimeout(() => setCameraSnapSignal(null), 100);
   }, []);
 
+  // Reset Model Scale, Pose and Camera to pristine normalized state
+  const handleResetModelTransform = useCallback(() => {
+    setResetTransformSignal((prev) => prev + 1);
+    setCameraSnapSignal('reset');
+    setTimeout(() => setCameraSnapSignal(null), 100);
+  }, []);
+
   // Screenshot
   const handleTakeScreenshot = useCallback(() => {
     setShouldTakeScreenshot(true);
@@ -242,6 +282,7 @@ export default function App() {
         onOpenUpload={() => setIsUploadModalOpen(true)}
         onOpenHelp={() => setIsHelpOpen(true)}
         onOpenHeritage={() => setIsHeritageOpen(true)}
+        onOpenAIAnimation={() => setIsAIAnimationOpen(true)}
       />
 
       {/* Main Workspace: Sidebar + 3D Viewport */}
@@ -270,9 +311,11 @@ export default function App() {
             settings={settings}
             onUpdateSettings={handleUpdateSettings}
             onCameraSnap={handleCameraSnap}
+            onResetModelTransform={handleResetModelTransform}
             onTakeScreenshot={handleTakeScreenshot}
             onOpenModelInfo={() => setIsModelInfoOpen(true)}
             onOpenHierarchy={() => setIsHierarchyOpen(true)}
+            onOpenAIAnimation={() => setIsAIAnimationOpen(true)}
             isFullscreen={isFullscreen}
             onToggleFullscreen={handleToggleFullscreen}
           />
@@ -286,6 +329,7 @@ export default function App() {
             animationSpeed={animationSpeed}
             animationTime={animationTime}
             isScrubbing={isScrubbing}
+            customClips={customClips}
             onAnimationTimeUpdate={(curTime, dur) => {
               setAnimationTime(curTime);
               setAnimationDuration(dur);
@@ -294,9 +338,30 @@ export default function App() {
             onThumbnailGenerated={handleThumbnailGenerated}
             hiddenMeshIds={hiddenMeshIds}
             cameraSnapSignal={cameraSnapSignal}
+            resetTransformSignal={resetTransformSignal}
             shouldTakeScreenshot={shouldTakeScreenshot}
             onScreenshotDone={handleScreenshotDone}
           />
+
+          {/* No Animation Suggestion Banner for Static 3D Models */}
+          {currentStats && (!currentStats.animations || currentStats.animations.length === 0) && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/90 backdrop-blur-md border border-cyan-500/40 rounded-2xl px-4 py-2.5 shadow-2xl shadow-black/70 z-10 flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-cyan-400 animate-pulse" />
+                <span className="text-xs text-slate-200 font-medium">
+                  현재 정적(Static) 3D 모델입니다.
+                </span>
+              </div>
+              <button
+                id="btn-trigger-ai-motion-banner"
+                onClick={() => setIsAIAnimationOpen(true)}
+                className="px-3 py-1.5 bg-gradient-to-r from-indigo-500 via-cyan-500 to-teal-500 hover:from-indigo-400 hover:to-cyan-400 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-cyan-500/20 active:scale-95 cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 fill-current" />
+                <span>✨ AI 모션 생성하기</span>
+              </button>
+            </div>
+          )}
 
           {/* Bottom Animation Controller */}
           {currentStats && currentStats.animations && currentStats.animations.length > 0 && (
@@ -306,6 +371,7 @@ export default function App() {
               onSelectAnimation={(idx) => setActiveAnimationIndex(idx)}
               isPlaying={isPlayingAnimation}
               onTogglePlay={() => setIsPlayingAnimation((prev) => !prev)}
+              onResetPose={handleResetModelTransform}
               currentTime={animationTime}
               duration={animationDuration}
               onSeek={(t) => setAnimationTime(t)}
@@ -317,6 +383,17 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* AI 3D Animation Generator Modal */}
+      <AIAnimationModal
+        isOpen={isAIAnimationOpen}
+        onClose={() => setIsAIAnimationOpen(false)}
+        model={activeModel}
+        stats={currentStats}
+        hierarchy={hierarchy}
+        onApplyAnimation={handleApplyAIAnimation}
+        onResetPose={handleResetModelTransform}
+      />
 
       {/* Upload Modal */}
       <UploadModal

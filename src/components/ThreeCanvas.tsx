@@ -18,11 +18,13 @@ interface ThreeCanvasProps {
   animationSpeed: number;
   animationTime: number; // For scrubber
   isScrubbing: boolean;
+  customClips?: THREE.AnimationClip[];
   onAnimationTimeUpdate?: (currentTime: number, duration: number) => void;
   onStatsLoaded?: (stats: ModelStats, hierarchy: MeshNodeInfo[]) => void;
   onThumbnailGenerated?: (dataUrl: string) => void;
   hiddenMeshIds?: Set<string>;
   cameraSnapSignal?: 'front' | 'top' | 'side' | 'isometric' | 'reset' | null;
+  resetTransformSignal?: number;
   onScreenshotRequested?: (dataUrl: string) => void;
   shouldTakeScreenshot?: boolean;
   onScreenshotDone?: () => void;
@@ -36,11 +38,13 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   animationSpeed,
   animationTime,
   isScrubbing,
+  customClips = [],
   onAnimationTimeUpdate,
   onStatsLoaded,
   onThumbnailGenerated,
   hiddenMeshIds,
   cameraSnapSignal,
+  resetTransformSignal,
   shouldTakeScreenshot,
   onScreenshotDone,
 }) => {
@@ -53,13 +57,18 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   
-  // Model & animation refs
-  const currentModelGroupRef = useRef<THREE.Group | null>(null);
+  // Model & animation hierarchy refs
+  const currentModelGroupRef = useRef<THREE.Group | null>(null); // Anchor Group (normalized scale & world position)
+  const motionWrapperRef = useRef<THREE.Group | null>(null); // Motion Wrapper (holds local position/rotation/scale for AI motions)
+  const loadedRootRef = useRef<THREE.Object3D | null>(null); // Inner loaded root mesh hierarchy
   const originalMaterialsRef = useRef<Map<THREE.Mesh, THREE.Material | THREE.Material[]>>(new Map());
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const actionRef = useRef<THREE.AnimationAction | null>(null);
+  const nativeClipsRef = useRef<THREE.AnimationClip[]>([]);
   const clipsRef = useRef<THREE.AnimationClip[]>([]);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
+  const defaultCameraDistanceRef = useRef<number>(5);
+  const defaultCameraTargetRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 1.5, 0));
 
   // Dynamic props synchronization refs (prevents stale closures in requestAnimationFrame loop)
   const isPlayingAnimationRef = useRef(isPlayingAnimation);
@@ -89,7 +98,6 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
 
   const [loadingProgress, setLoadingProgress] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const defaultCameraDistanceRef = useRef<number>(5);
 
   // Initialize Scene, Camera, Renderer, Controls
   useEffect(() => {
@@ -392,13 +400,36 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const center = box.getCenter(new THREE.Vector3());
 
       const maxDim = Math.max(size.x, size.y, size.z);
-      const scale = maxDim > 0 ? 3.0 / maxDim : 1; // Normalize to roughly 3 units
-      root.scale.setScalar(scale);
+      const scale = maxDim > 0 ? 3.0 / maxDim : 1; // Normalize to standard ~3 viewport units
 
-      // Center on X and Z, and place base on Y = 0 (ground level)
-      root.position.x = -center.x * scale;
-      root.position.z = -center.z * scale;
-      root.position.y = -box.min.y * scale;
+      // Double-Group Isolation Architecture:
+      // 1. anchorGroup: root in Three.js scene, holds the normalized scale (3.0/maxDim) and world position
+      // 2. motionWrapper: holds identity transform (pos=0,0,0, rot=0,0,0, scale=1,1,1) for AI & procedural tracks
+      // 3. root: raw geometry with local offset to align model base at Y=0 and center on X/Z
+      const anchorGroup = new THREE.Group();
+      anchorGroup.name = 'AnchorGroup_Normalization';
+
+      const motionWrapper = new THREE.Group();
+      motionWrapper.name = 'MotionWrapper_AI_Kinematics';
+
+      anchorGroup.add(motionWrapper);
+      motionWrapper.add(root);
+
+      // Pivot geometry centering on loaded raw root
+      root.position.set(-center.x, -box.min.y, -center.z);
+
+      // Normalized scale applied strictly to anchorGroup
+      anchorGroup.scale.setScalar(scale);
+      anchorGroup.position.set(0, 0, 0);
+
+      // motionWrapper stays at clean identity
+      motionWrapper.position.set(0, 0, 0);
+      motionWrapper.rotation.set(0, 0, 0);
+      motionWrapper.scale.set(1, 1, 1);
+
+      currentModelGroupRef.current = anchorGroup;
+      motionWrapperRef.current = motionWrapper;
+      loadedRootRef.current = root;
 
       // Calculate statistics & hierarchy
       let triangleCount = 0;
@@ -470,7 +501,7 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
       const hierarchyRoot = buildHierarchy(root);
 
       // Compute normalized scaled dimensions in units
-      const realBox = new THREE.Box3().setFromObject(root);
+      const realBox = new THREE.Box3().setFromObject(anchorGroup);
       const realSize = realBox.getSize(new THREE.Vector3());
 
       const animationNames = animations.map((a, i) => a.name || `Animation ${i + 1}`);
@@ -488,11 +519,12 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         },
       };
 
-      scene.add(root);
+      scene.add(anchorGroup);
 
       // Adjust Camera to frame model
       if (cameraRef.current && controlsRef.current) {
-        const targetY = (realSize.y / 2);
+        const targetY = realSize.y / 2;
+        defaultCameraTargetRef.current.set(0, targetY, 0);
         controlsRef.current.target.set(0, targetY, 0);
 
         const distance = Math.max(realSize.x, realSize.y, realSize.z) * 2.2;
@@ -501,16 +533,19 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         controlsRef.current.update();
       }
 
-      // Setup Animations
-      if (animations.length > 0) {
-        clipsRef.current = animations;
-        const mixer = new THREE.AnimationMixer(root);
-        mixerRef.current = mixer;
+      // Setup Animations (Mixer unconditionally initialized on motionWrapper)
+      const mixer = new THREE.AnimationMixer(motionWrapper);
+      mixerRef.current = mixer;
 
-        const clipToPlay = animations[activeAnimationIndex] || animations[0];
+      nativeClipsRef.current = animations || [];
+      const combinedClips = [...nativeClipsRef.current, ...(customClips || [])];
+      clipsRef.current = combinedClips;
+
+      if (combinedClips.length > 0) {
+        const clipToPlay = combinedClips[activeAnimationIndex] || combinedClips[0];
         const action = mixer.clipAction(clipToPlay);
         action.setEffectiveTimeScale(animationSpeedRef.current);
-        action.play();
+        action.reset().play();
         if (!isPlayingAnimationRef.current) {
           action.paused = true;
         }
@@ -790,28 +825,31 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     });
   }, [hiddenMeshIds]);
 
-  // Handle Animation clip change (only when switching clips)
+  // Handle customClips and activeAnimationIndex updates dynamically
   useEffect(() => {
+    clipsRef.current = [...nativeClipsRef.current, ...(customClips || [])];
+    if (!mixerRef.current && motionWrapperRef.current) {
+      mixerRef.current = new THREE.AnimationMixer(motionWrapperRef.current);
+    }
     if (!mixerRef.current || clipsRef.current.length === 0) return;
 
-    const clip = clipsRef.current[activeAnimationIndex];
+    const clip = clipsRef.current[activeAnimationIndex] || clipsRef.current[0];
     if (!clip) return;
+
+    if (actionRef.current) {
+      actionRef.current.stop();
+    }
 
     const newAction = mixerRef.current.clipAction(clip);
     newAction.setEffectiveTimeScale(animationSpeedRef.current);
-    if (actionRef.current && actionRef.current !== newAction) {
-      actionRef.current.fadeOut(0.25);
-      newAction.reset().fadeIn(0.25).play();
-    } else {
-      newAction.play();
-    }
+    newAction.reset().play();
     newAction.paused = !isPlayingAnimationRef.current;
     actionRef.current = newAction;
 
     if (onAnimationTimeUpdateRef.current) {
       onAnimationTimeUpdateRef.current(0, clip.duration);
     }
-  }, [activeAnimationIndex]);
+  }, [activeAnimationIndex, customClips]);
 
   // Handle Play/Pause toggle
   useEffect(() => {
@@ -841,6 +879,40 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
     }
   }, [animationTime, isScrubbing, isPlayingAnimation]);
 
+  // Reset Model Scale, Pose & Camera Framing to pristine state
+  const resetModelTransform = useCallback(() => {
+    if (motionWrapperRef.current) {
+      motionWrapperRef.current.position.set(0, 0, 0);
+      motionWrapperRef.current.rotation.set(0, 0, 0);
+      motionWrapperRef.current.quaternion.set(0, 0, 0, 1);
+      motionWrapperRef.current.scale.set(1, 1, 1);
+    }
+    if (mixerRef.current) {
+      mixerRef.current.setTime(0);
+      if (actionRef.current) {
+        actionRef.current.time = 0;
+      }
+      mixerRef.current.update(0);
+    }
+    if (cameraRef.current && controlsRef.current) {
+      const dist = defaultCameraDistanceRef.current;
+      const target = defaultCameraTargetRef.current;
+      controlsRef.current.target.copy(target);
+      cameraRef.current.position.set(dist * 0.9, target.y + dist * 0.5, dist * 1.1);
+      controlsRef.current.update();
+    }
+    if (onAnimationTimeUpdateRef.current && actionRef.current) {
+      onAnimationTimeUpdateRef.current(0, actionRef.current.getClip().duration);
+    }
+  }, []);
+
+  // Handle explicit resetTransformSignal
+  useEffect(() => {
+    if (resetTransformSignal !== undefined && resetTransformSignal > 0) {
+      resetModelTransform();
+    }
+  }, [resetTransformSignal, resetModelTransform]);
+
   // Handle Camera Snap Signal
   useEffect(() => {
     if (!cameraSnapSignal || !cameraRef.current || !controlsRef.current) return;
@@ -864,11 +936,11 @@ export const ThreeCanvas: React.FC<ThreeCanvasProps> = ({
         camera.position.set(target.x + dist * 0.7, target.y + dist * 0.7, target.z + dist * 0.7);
         break;
       case 'reset':
-        camera.position.set(dist * 0.9, target.y + dist * 0.5, dist * 1.1);
+        resetModelTransform();
         break;
     }
     controls.update();
-  }, [cameraSnapSignal]);
+  }, [cameraSnapSignal, resetModelTransform]);
 
   // Handle Screenshot
   useEffect(() => {
